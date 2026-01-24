@@ -41,6 +41,7 @@ class Vasp(MakefilePackage, CudaPackage):
     variant("libbeef", default=False, description="Enable Libbeef support")
     variant("libxc", default=False, description="Enable Libxc support")
     variant("wannier90", default=False, description="Enable wannier90 support")
+    variant("vtstcode", default=False, description="Apply VTST code patches")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
@@ -75,6 +76,57 @@ class Vasp(MakefilePackage, CudaPackage):
     conflicts("^[virtuals=mpi] nvhpc", when="%gcc", msg="nvhpc mpi requires nvhpc compiler")
     conflicts("^[virtuals=mpi] nvhpc", when="%aocc", msg="nvhpc mpi requires nvhpc compiler")
     conflicts("cuda_arch=none", when="+cuda", msg="CUDA arch required when building openacc port")
+
+    resource(
+        name="vtstcode",
+        url="https://theory.cm.utexas.edu/code/vtstcode-213.tgz",
+        sha256="9c8403adee78af303611edadd6f925e9031ab157ccd133850b374046b2f07c73",
+        when="+vtstcode"
+    )
+
+    def patch(self):
+        if self.spec.satisfies("+vtstcode"):
+            if self.spec.satisfies("@6.4.0:6.4.2"):
+                vtstcode = 'vtstcode6.4.0'
+            elif self.spec.satisfies("@6.4.3"):
+                vtstcode = 'vtstcode6.4.3'
+            srcdir = self.stage.source_path + "/vtstcode-213/" + vtstcode
+            copy_tree(srcdir, "src")
+
+            filter_file(
+                "CALL CHAIN_FORCE(T_INFO%NIONS,DYN%POSION,TOTEN,TIFOR, &",
+                "CALL CHAIN_FORCE(T_INFO%NIONS,DYN%POSION,TOTEN,TIFOR,TSIF, &",
+                "src/main.F",
+                string=True
+            )
+
+            filter_file(
+                "IF (LCHAIN) CALL chain_init( T_INFO, IO)",
+                "CALL chain_init( T_INFO, IO)",
+                "src/main.F",
+                string=True
+            )
+
+            filter_file(
+                "chain.o",
+                "bfgs.o dynmat.o instanton.o lbfgs.o sd.o cg.o dimer.o bbm.o fire.o lanczos.o neb.o qm.o pyamff_fortran/*.o ml_pyamff.o opt.o chain.o",
+                "src/.objects",
+                string=True
+            )
+
+            filter_file(
+                "LIB=lib parser",
+                "LIB=lib parser pyamff_fortran",
+                "src/makefile",
+                string=True
+            )
+
+            filter_file(
+                "dependencies: sources",
+                "dependencies: sources libs",
+                "src/makefile",
+                string=True
+            )
 
     def edit(self, spec, prefix):
         cpp_options = [
